@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Robô de Chamados Vivo</title>
+  <link rel="icon" href="/assets/app_icon.png">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <img src="/assets/vivo_wordmark.png" alt="Vivo" class="wordmark">
+      <div>
+        <div class="topbar-title">Robô de Chamados</div>
+        <div class="topbar-sub">VPN IP MPLS · DPSP</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="sim-badge" class="badge badge-warn" hidden>MODO SIMULAÇÃO</span>
+      <span id="conn" class="conn" title="Conexão com o robô"><span class="dot"></span><span id="conn-text">Conectando…</span></span>
+      <button id="btn-shutdown" class="btn btn-ghost-light" type="button">Encerrar robô</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-tab="chamado" role="tab">Chamado</button>
+    <button class="tab" data-tab="lote" role="tab">Lote</button>
+    <button class="tab" data-tab="historico" role="tab">Histórico</button>
+    <button class="tab" data-tab="config" role="tab">Configurações</button>
+  </nav>
+
+  <div id="busy-banner" class="busy-banner" hidden>
+    <span class="spinner"></span>
+    <span id="busy-banner-text">Operação em andamento…</span>
+    <button id="busy-banner-go" class="link-btn" type="button">Ver andamento</button>
+  </div>
+
+  <main>
+    <!-- ===================== CHAMADO ===================== -->
+    <section id="tab-chamado" class="tab-panel is-active">
+      <div class="grid-2">
+        <div class="stack">
+          <form id="lookup-form" class="card" autocomplete="off">
+            <h2 class="card-title"><span class="step">1</span> Loja</h2>
+            <label class="label" for="entrada">VD da filial ou host do Zabbix</label>
+            <div class="input-row">
+              <input id="entrada" class="input" placeholder="Ex.: 1517, VD1517 ou DSP_1517_MPLS_VIVO" required>
+              <button id="btn-lookup" class="btn btn-primary" type="submit">Consultar</button>
+            </div>
+            <p class="hint">Somente leitura: consulta a planilha de lojas e o inventário de links.</p>
+            <div id="lookup-error" class="alert alert-error" hidden></div>
+            <div id="store-card" class="store" hidden>
+              <div class="store-head">
+                <div>
+                  <div id="store-name" class="store-name"></div>
+                  <div id="store-vd" class="muted"></div>
+                </div>
+                <span id="store-24h" class="badge badge-ok" hidden>24 HORAS</span>
+              </div>
+              <dl class="kv">
+                <dt>Endereço</dt><dd id="store-address"></dd>
+                <dt>Funcionamento</dt><dd id="store-hours"></dd>
+                <dt>Host Zabbix</dt><dd id="store-host"></dd>
+              </dl>
+            </div>
+          </form>
+
+          <div id="circuit-card" class="card" hidden>
+            <h2 class="card-title"><span class="step">2</span> Circuito Vivo MPLS</h2>
+            <div id="links" class="choice-list"></div>
+          </div>
+
+          <div id="issue-card" class="card" hidden>
+            <h2 class="card-title"><span class="step">3</span> Problema</h2>
+            <div class="segmented" role="radiogroup">
+              <label><input type="radio" name="issue" value="link_interrompido" checked><span>Link inoperante</span></label>
+              <label><input type="radio" name="issue" value="perca_pacotes"><span>Perda de pacotes</span></label>
+            </div>
+          </div>
+
+          <div id="preview-card" class="card" hidden>
+            <h2 class="card-title"><span class="step">4</span> Revisão do chamado</h2>
+            <div id="preview-dup" class="alert alert-warn" hidden></div>
+            <dl id="preview-kv" class="kv"></dl>
+            <label class="label">Texto que será enviado à Vivo</label>
+            <pre id="preview-text" class="preview-text"></pre>
+            <div class="actions">
+              <button id="btn-open-ticket" class="btn btn-primary btn-lg" type="button">Abrir chamado</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card sticky">
+            <h2 class="card-title">Andamento</h2>
+            <div id="op-empty" class="empty">
+              <p>Consulte uma loja e revise os dados para abrir o chamado.</p>
+              <ul class="rules">
+                <li>O circuito encontrado no portal precisa da sua confirmação.</li>
+                <li>Você revisa o texto final antes do envio.</li>
+                <li>O robô nunca reenvia um chamado sozinho.</li>
+              </ul>
+            </div>
+            <div id="op-ticket" hidden>
+              <div class="op-head">
+                <div>
+                  <div id="op-title" class="op-title"></div>
+                  <div id="op-sub" class="muted"></div>
+                </div>
+                <span id="op-chip" class="chip"></span>
+              </div>
+              <div id="op-status" class="op-status"><span class="spinner"></span><span id="op-status-text"></span></div>
+              <div id="op-result" class="result" hidden>
+                <div class="result-grid">
+                  <div>
+                    <div class="label">Protocolo Vivo</div>
+                    <div class="copy-field"><span id="res-protocol" class="mono big"></span><button class="btn btn-sm" type="button" data-copy-from="res-protocol">Copiar</button></div>
+                  </div>
+                  <div>
+                    <div class="label">Número do caso</div>
+                    <div class="copy-field"><span id="res-case" class="mono big"></span><button class="btn btn-sm" type="button" data-copy-from="res-case">Copiar</button></div>
+                  </div>
+                </div>
+                <div id="res-message" class="result-message"></div>
+                <div id="res-zabbix" class="zabbix-line"></div>
+                <div id="res-support" class="support" hidden>
+                  <div class="alert alert-warn">Não envie o chamado novamente. Copie a frase abaixo para pedir apoio ao time.</div>
+                  <textarea id="res-support-text" class="input mono" rows="7" readonly></textarea>
+                  <div class="actions"><button class="btn btn-primary" type="button" data-copy-from="res-support-text">Copiar frase</button></div>
+                </div>
+              </div>
+              <div class="actions">
+                <button id="btn-cancel-ticket" class="btn btn-danger-ghost" type="button" hidden>Interromper</button>
+                <button id="btn-new-ticket" class="btn" type="button" hidden>Nova consulta</button>
+              </div>
+            </div>
+            <details class="log-box" open>
+              <summary>Registro da sessão</summary>
+              <ol id="log" class="log"></ol>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== LOTE ===================== -->
+    <section id="tab-lote" class="tab-panel">
+      <div id="batch-form-card" class="card">
+        <h2 class="card-title">Abertura em lote</h2>
+        <p class="muted">Até <b id="batch-limit">50</b> VDs por vez, separados por espaço, vírgula, ponto e vírgula ou um por linha. Hosts completos (DSP_…/DPA_…) são aceitos e usados no Zabbix.</p>
+        <textarea id="batch-input" class="input mono" rows="6" placeholder="1517 1344, VD2574&#10;DPA_1627_MPLS_VIVO"></textarea>
+        <div class="row-between">
+          <div class="segmented" role="radiogroup">
+            <label><input type="radio" name="batch-issue" value="link_interrompido" checked><span>Link inoperante</span></label>
+            <label><input type="radio" name="batch-issue" value="perca_pacotes"><span>Perda de pacotes</span></label>
+          </div>
+          <button id="btn-batch-prepare" class="btn btn-primary" type="button">Revisar lote</button>
+        </div>
+        <div id="batch-error" class="alert alert-error" hidden></div>
+      </div>
+
+      <div id="batch-review" class="card" hidden>
+        <div class="row-between">
+          <h2 class="card-title">Revisão do lote</h2>
+          <span id="batch-review-issue" class="badge"></span>
+        </div>
+        <div id="batch-ignored" class="alert alert-warn" hidden></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>#</th><th>VD</th><th>Host Zabbix</th><th>Loja</th><th>Designação</th><th>Avisos</th></tr></thead>
+            <tbody id="batch-review-body"></tbody>
+          </table>
+        </div>
+        <p class="muted">O robô usa a mesma sessão do navegador, com até <b id="batch-tabs">5</b> abas ao mesmo tempo. Cada circuito encontrado no portal ainda pede sua confirmação, identificada pelo VD. Um erro em uma loja não interrompe as demais.</p>
+        <div class="actions">
+          <button id="btn-batch-discard" class="btn" type="button">Descartar</button>
+          <button id="btn-batch-start" class="btn btn-primary btn-lg" type="button">Autorizar lote</button>
+        </div>
+      </div>
+
+      <div id="batch-progress" class="card" hidden>
+        <div class="row-between">
+          <h2 class="card-title">Andamento do lote</h2>
+          <span id="batch-chip" class="chip"></span>
+        </div>
+        <div id="batch-status" class="op-status"><span class="spinner"></span><span id="batch-status-text"></span></div>
+        <div id="batch-counters" class="counters"></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th><input type="checkbox" id="batch-select-all" title="Selecionar todos"></th><th>#</th><th>VD</th><th>Host</th><th>Status</th><th>Protocolo</th><th>Caso</th><th>Zabbix</th><th>Detalhe</th></tr></thead>
+            <tbody id="batch-body"></tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <button id="btn-cancel-batch" class="btn btn-danger-ghost" type="button" hidden>Interromper lote</button>
+          <span class="spacer"></span>
+          <button class="btn" type="button" data-batch-copy="cases">Copiar casos</button>
+          <button class="btn" type="button" data-batch-copy="details">Copiar detalhes</button>
+          <button class="btn" type="button" data-batch-copy="sentences">Copiar frase completa</button>
+          <button id="btn-batch-new" class="btn btn-primary" type="button" hidden>Novo lote</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== HISTÓRICO ===================== -->
+    <section id="tab-historico" class="tab-panel">
+      <div class="card">
+        <div class="row-between">
+          <h2 class="card-title">Chamados abertos</h2>
+          <div class="input-row narrow">
+            <input id="hist-filter" class="input" placeholder="Filtrar por VD, loja, protocolo…">
+            <button id="btn-hist-refresh" class="btn" type="button">Atualizar</button>
+          </div>
+        </div>
+        <p id="hist-summary" class="muted"></p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Data</th><th>VD</th><th>Loja</th><th>Problema</th><th>Designação</th><th>Protocolo</th><th>Caso</th><th>Status</th><th>Zabbix</th></tr></thead>
+            <tbody id="hist-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Reconhecimentos no Zabbix</h2>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Data</th><th>VD</th><th>Host</th><th>Protocolo</th><th>Status</th><th>Detalhe</th></tr></thead>
+            <tbody id="zbx-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== CONFIGURAÇÕES ===================== -->
+    <section id="tab-config" class="tab-panel">
+      <div class="grid-2">
+        <form id="vivo-form" class="card" autocomplete="off">
+          <h2 class="card-title">Acesso ao Portal Vivo</h2>
+          <p id="vivo-status" class="muted"></p>
+          <label class="label" for="vivo-cpf">CPF</label>
+          <input id="vivo-cpf" class="input" inputmode="numeric" placeholder="Somente números" autocomplete="off">
+          <label class="label" for="vivo-senha">Senha</label>
+          <input id="vivo-senha" class="input" type="password" autocomplete="new-password">
+          <p class="hint">A senha fica no Gerenciador de Credenciais do Windows. Não é gravada em arquivos nem nos registros do robô. Salvar também apaga a sessão anterior do navegador do robô.</p>
+          <div class="actions">
+            <button id="btn-vivo-remove" class="btn btn-danger-ghost" type="button" hidden>Remover acesso</button>
+            <button class="btn btn-primary" type="submit">Salvar acesso</button>
+          </div>
+        </form>
+
+        <form id="zbx-form" class="card" autocomplete="off">
+          <h2 class="card-title">Integração com o Zabbix</h2>
+          <p id="zbx-status" class="muted"></p>
+          <label class="label" for="zbx-url">URL da API</label>
+          <input id="zbx-url" class="input mono">
+          <label class="label" for="zbx-token">Token da API</label>
+          <input id="zbx-token" class="input" type="password" autocomplete="new-password">
+          <p id="zbx-token-hint" class="hint" hidden>Deixe o token vazio para manter o que já está protegido pelo Windows.</p>
+          <label class="check"><input id="zbx-auto" type="checkbox" checked> Reconhecer automaticamente quando houver Protocolo Vivo</label>
+          <p class="hint">Se o host ou o incidente não forem únicos, nada é alterado no Zabbix.</p>
+          <div class="actions">
+            <button id="btn-zbx-remove" class="btn btn-danger-ghost" type="button" hidden>Remover</button>
+            <button id="btn-zbx-test" class="btn" type="button">Testar conexão</button>
+            <button class="btn btn-primary" type="submit">Salvar</button>
+          </div>
+        </form>
+
+        <div class="card">
+          <h2 class="card-title">Bases e modelos</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Item</th><th>Arquivo</th><th>Situação</th><th>Atualizado em</th></tr></thead>
+              <tbody id="bases-body"></tbody>
+            </table>
+          </div>
+          <p class="hint">Para trocar uma base, substitua o arquivo na pasta <span class="mono">arquivos\data</span> mantendo o mesmo nome.</p>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Parâmetros (configuracao.ini)</h2>
+          <dl id="params" class="kv"></dl>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="modal" class="modal">
+    <form method="dialog" class="modal-inner">
+      <div class="modal-head">
+        <h2 id="modal-title"></h2>
+        <span id="modal-counter" class="badge" hidden></span>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-actions" class="modal-actions"></div>
+    </form>
+  </dialog>
+
+  <div id="closed" class="closed" hidden>
+    <div class="card">
+      <h2 class="card-title">Robô encerrado</h2>
+      <p>Você já pode fechar esta aba. Para usar de novo, abra pelo atalho <b>Executar automação vivo (web)</b>.</p>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
