@@ -25,11 +25,12 @@ if not exist "%ROBO_CHROME_EXE%" goto :chrome_error
 "%ROBO_NODE_EXE%" -e "require('playwright')" >nul 2>&1
 if errorlevel 1 goto :playwright_error
 
-if /i "%~1"=="--self-test" (
-    "%ROBO_APP_EXE%" --self-test
-    exit /b %errorlevel%
-)
+if /i not "%~1"=="--self-test" goto :launch
+rem Fora de bloco ( ), para %errorlevel% refletir o resultado real do autoteste.
+"%ROBO_APP_EXE%" --self-test
+exit /b %errorlevel%
 
+:launch
 start "" "%ROBO_APP_EXE%"
 if errorlevel 1 goto :start_error
 exit /b 0
