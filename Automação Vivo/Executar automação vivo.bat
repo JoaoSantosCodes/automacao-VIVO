@@ -25,6 +25,8 @@ if not exist "%ROBO_CHROME_EXE%" goto :chrome_error
 "%ROBO_NODE_EXE%" -e "require('playwright')" >nul 2>&1
 if errorlevel 1 goto :playwright_error
 
+if /i "%~1"=="--web" goto :launch_web
+if /i "%~1"=="--simulacao" goto :launch_web
 if /i not "%~1"=="--self-test" goto :launch
 rem Fora de bloco ( ), para %errorlevel% refletir o resultado real do autoteste.
 "%ROBO_APP_EXE%" --self-test
@@ -32,6 +34,12 @@ exit /b %errorlevel%
 
 :launch
 start "" "%ROBO_APP_EXE%"
+if errorlevel 1 goto :start_error
+exit /b 0
+
+:launch_web
+rem Interface web local: abre o navegador padrao em 127.0.0.1.
+start "" "%ROBO_APP_EXE%" %1
 if errorlevel 1 goto :start_error
 exit /b 0
 

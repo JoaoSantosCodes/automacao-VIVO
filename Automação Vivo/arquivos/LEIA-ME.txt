@@ -15,6 +15,48 @@ IDENTIDADE VISUAL V5.5
   disponível no botão "Copiar frase". O chamado não é reenviado.
 - Nenhuma regra de abertura, confirmação ou reconhecimento do Zabbix foi alterada.
 
+INTERFACE WEB (NOVA)
+
+A mesma automação também pode ser usada pelo navegador. As duas telas usam as
+mesmas regras: confirmação do circuito, revisão final, trava de duplicidade,
+histórico, Zabbix e credenciais do Windows. Use uma ou outra, não as duas ao
+mesmo tempo.
+
+1. Dê dois cliques em "Executar automação vivo (web).bat". O navegador padrão
+   abre a página do robô sozinho.
+2. Abas da página:
+   - Chamado: informe o VD ou o host, confira loja e circuito, escolha o
+     problema, revise o texto e clique em "Abrir chamado".
+   - Lote: cole até 50 VDs, clique em "Revisar lote" e depois em "Autorizar
+     lote". Cada circuito encontrado no portal continua pedindo confirmação,
+     identificada pelo VD. Itens que não parecem VD são avisados na revisão.
+   - Histórico: chamados abertos e reconhecimentos do Zabbix, com filtro.
+     Chamados dentro da janela de duplicidade aparecem como "RECENTE".
+   - Configurações: login do Portal Vivo, API do Zabbix e situação das bases.
+3. As confirmações do portal (circuito e revisão final) aparecem por cima da
+   página. Elas não fecham com Esc: responda "Sim" ou "Não".
+4. Para fechar, clique em "Encerrar robô". Se todas as abas ficarem fechadas
+   por 30 minutos, o robô também se encerra sozinho (ajustável em
+   configuracao.ini, seção [web]).
+5. Se fechar a aba sem querer, dê dois cliques no atalho de novo: a mesma
+   sessão é reaberta, inclusive com uma operação em andamento.
+
+TREINAMENTO SEM RISCO
+
+"Executar automação vivo (simulação).bat" abre a interface web em MODO
+SIMULAÇÃO: usa as bases reais, mas não acessa o portal, não envia chamados,
+não altera o Zabbix e não grava no histórico. O protocolo exibido é 0000000.
+
+SEGURANÇA DA INTERFACE WEB
+
+- A página só funciona neste computador (endereço 127.0.0.1). Outros
+  computadores da rede não conseguem acessá-la.
+- Cada abertura gera uma chave nova. Um endereço copiado de outra sessão não
+  funciona.
+- CPF, senha e token continuam somente no Gerenciador de Credenciais do Windows.
+
+USO PELA JANELA TRADICIONAL
+
 1. Na pasta principal "Automação Vivo", dê dois cliques em
    "Executar automação vivo.bat". Não mova nem renomeie a pasta "arquivos".
 2. Somente no primeiro uso, informe CPF e senha na janela "Acesso automático".

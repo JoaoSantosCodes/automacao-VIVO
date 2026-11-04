@@ -412,6 +412,308 @@ class WorkerClient:
             process.terminate()
 
 
+# ---------------------------------------------------------------------------
+# Regras compartilhadas entre a interface Tkinter e a interface web.
+# Nenhuma delas depende de widgets; ambas as telas chamam estas funções para
+# garantir as mesmas travas (duplicidade, histórico, Zabbix e credenciais).
+# ---------------------------------------------------------------------------
+
+
+def credential_api() -> Any:
+    if str(APP_DIR) not in sys.path:
+        sys.path.insert(0, str(APP_DIR))
+    import credential_store  # type: ignore
+
+    return credential_store
+
+
+def zabbix_client_for(credentials: Any) -> Any:
+    if str(APP_DIR) not in sys.path:
+        sys.path.insert(0, str(APP_DIR))
+    from zabbix_client import ZabbixClient  # type: ignore
+
+    return ZabbixClient(credentials.api_url, credentials.token)
+
+
+def find_node_and_worker() -> tuple[str, Path]:
+    node = os.environ.get("ROBO_NODE_EXE", "").strip()
+    if not node:
+        node = shutil.which("node") or ""
+    worker_candidates = (APP_DIR / "vivo_worker.mjs", PACKAGE_DIR / "automation" / "vivo_worker.mjs")
+    worker = next((path for path in worker_candidates if path.is_file()), worker_candidates[0])
+    if node and not Path(node).is_file():
+        # Alguns pacotes antigos apontavam para ``node\node.exe`` enquanto
+        # o runtime atual o mantém em ``node\bin\node.exe``.
+        alternate = Path(node).parent / "bin" / "node.exe"
+        if alternate.is_file():
+            node = str(alternate)
+    if not node or not Path(node).is_file():
+        # shutil.which pode retornar nome resolvível, mas normalmente retorna caminho.
+        resolved = shutil.which(node) if node else None
+        if not resolved:
+            raise FileNotFoundError("O componente Node.js não foi encontrado.")
+        node = resolved
+    if not worker.is_file():
+        raise FileNotFoundError(f"Automação do portal não encontrada: {worker}")
+    return node, worker
+
+
+def clear_robot_profile() -> None:
+    """Remove somente a sessão do perfil exclusivo deste robô."""
+
+    local_app_data_raw = os.environ.get("LOCALAPPDATA", "").strip()
+    if not local_app_data_raw:
+        raise OSError("A pasta LOCALAPPDATA do Windows não está disponível.")
+    local_app_data = Path(local_app_data_raw).resolve()
+    robot_root = (local_app_data / "RoboVivo").resolve()
+    profile = (robot_root / "ChromeProfile").resolve()
+    if robot_root not in profile.parents or profile.name != "ChromeProfile":
+        raise RuntimeError("O caminho do perfil do robô não pôde ser validado.")
+    if profile.is_dir():
+        shutil.rmtree(profile)
+
+
+def build_ticket_payload(
+    config: configparser.ConfigParser,
+    ticket: dict[str, Any],
+    store: dict[str, Any],
+    link: dict[str, Any],
+    target_vd: str,
+    target_issue: str,
+) -> dict[str, Any]:
+    ticket_store = field(ticket, "loja", default=store)
+    if not isinstance(ticket_store, Mapping):
+        ticket_store = store
+    ticket_link = field(ticket, "link", "circuito", default=link)
+    if not isinstance(ticket_link, Mapping):
+        ticket_link = link
+    start = field(ticket, "hora_inicio", default=field(ticket_store, "hora_inicio"))
+    finish = field(
+        ticket,
+        "hora_fim",
+        "hora_termino",
+        default=field(ticket_store, "hora_fim", "hora_termino"),
+    )
+    is_24h = bool(field(ticket_store, "vinte_quatro_horas", default=False))
+    if is_24h:
+        start, finish = "00:00", "23:59"
+    contact = {
+        "apelido": target_vd,
+        "nome": config.get("contato", "nome", fallback="central de comando"),
+        "telefone": config.get("contato", "telefone", fallback="1132747527"),
+        "email": config.get("contato", "email", fallback="central.comando@dpsp.com.br"),
+        "compartilhar_celular": config.get("contato", "compartilhar_celular", fallback="Sim"),
+        "capacitacao_documentacao": config.get(
+            "contato", "capacitacao_documentacao", fallback="Sim"
+        ),
+    }
+    description = field(ticket, "descricao")
+    if not description:
+        raise RuntimeError("A descrição do chamado não foi gerada pela base.")
+    return {
+        "request_id": str(uuid.uuid4()),
+        "config_path": str(CONFIG_PATH),
+        "vd": target_vd,
+        "problema": target_issue,
+        "issue": target_issue,
+        "descricao": description,
+        "description": description,
+        "loja": dict(ticket_store),
+        "store": dict(ticket_store),
+        "circuito": dict(ticket_link),
+        "link": dict(ticket_link),
+        "horario_inicio": str(start),
+        "horario_termino": str(finish),
+        "hora_inicio": str(start),
+        "hora_fim": str(finish),
+        "contato": contact,
+        "contact": contact,
+        "produto_filtro": config.get("portal", "produto_filtro", fallback="mpls"),
+        "produto_esperado": config.get("portal", "produto_esperado", fallback="VPN IP MPLS"),
+        "portal_url": config.get(
+            "portal", "url_portal", fallback="https://mve.vivo.com.br/sec/dashboard"
+        ),
+        "ocorrencia": config.get("portal", "ocorrencia", fallback="Indisponibilidade"),
+        "tempo_protocolo_segundos": config.getint(
+            "portal", "tempo_protocolo_segundos", fallback=300
+        ),
+        "navegador_oculto": config_bool(config, "portal", "navegador_oculto", fallback=True),
+        "allow_submit": True,
+    }
+
+
+def history_path(config: configparser.ConfigParser) -> Path:
+    return resolve_config_path(config, "arquivos", "historico")
+
+
+def recent_duplicate(
+    config: configparser.ConfigParser, payload: Mapping[str, Any], fallback_vd: str = ""
+) -> bool:
+    path = history_path(config)
+    if not path.is_file():
+        return False
+    window = config.getint("seguranca", "janela_duplicidade_horas", fallback=24)
+    cutoff = dt.datetime.now().astimezone() - dt.timedelta(hours=max(window, 0))
+    designation = str(field(payload.get("circuito", {}), "designacao", "identificacao"))
+    target_vd = str(payload.get("vd") or fallback_vd)
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            for row in csv.DictReader(stream, delimiter=";"):
+                if row.get("vd", "").casefold() != target_vd.casefold():
+                    continue
+                if designation and row.get("designacao", "").casefold() != designation.casefold():
+                    continue
+                try:
+                    recorded = dt.datetime.fromisoformat(row.get("data_hora", ""))
+                    if recorded.tzinfo is None:
+                        recorded = recorded.astimezone()
+                    if recorded >= cutoff:
+                        return True
+                except ValueError:
+                    continue
+    except Exception:
+        logging.exception("Não foi possível consultar duplicidades no histórico")
+    return False
+
+
+def write_history(
+    config: configparser.ConfigParser,
+    status: str,
+    protocol: str,
+    case_number: str,
+    vd_value: str,
+    store: Mapping[str, Any],
+    link: Mapping[str, Any],
+    issue_value: str,
+) -> None:
+    try:
+        path = history_path(config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        exists = path.is_file() and path.stat().st_size > 0
+        row = {
+            "data_hora": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "vd": vd_value,
+            "loja": field(store, "nome", "nome_loja"),
+            "problema": issue_value,
+            "designacao": field(link, "designacao", "identificacao"),
+            "usuario_id": field(link, "usuario", "id_servico"),
+            "protocolo_vivo": protocol,
+            "numero_caso": case_number,
+            "status": status,
+        }
+        with path.open("a", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(row), delimiter=";")
+            if not exists:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception:
+        logging.exception("Não foi possível registrar o histórico")
+
+
+ZABBIX_AUDIT_FILE = "zabbix_reconhecimentos.csv"
+
+
+def write_zabbix_audit(config: configparser.ConfigParser, result: Mapping[str, Any]) -> None:
+    try:
+        path = history_path(config).parent / ZABBIX_AUDIT_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        exists = path.is_file() and path.stat().st_size > 0
+        row = {
+            "data_hora": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "vd": str(result.get("vd") or ""),
+            "host": str(result.get("zabbix_host") or ""),
+            "protocolo_vivo": str(result.get("protocol") or ""),
+            "status_zabbix": str(result.get("zabbix_status") or ""),
+            "detalhe": str(result.get("zabbix_detail") or "").replace("\r", " ").replace("\n", " "),
+        }
+        with path.open("a", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(row), delimiter=";")
+            if not exists:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception:
+        logging.exception("Não foi possível registrar a auditoria do Zabbix")
+
+
+def zabbix_update_result(
+    config: configparser.ConfigParser,
+    result: dict[str, str],
+    credentials: Any,
+    client_factory: Callable[[Any], Any] = zabbix_client_for,
+) -> dict[str, str]:
+    updated = dict(result)
+
+    def finish() -> dict[str, str]:
+        write_zabbix_audit(config, updated)
+        return updated
+
+    protocol = str(updated.get("protocol") or "").strip()
+    host = str(updated.get("zabbix_host") or "").strip()
+    vd = str(updated.get("vd") or "").strip()
+    zabbix_target = host or vd
+    if updated.get("status") != "ABERTO" or not protocol:
+        updated["zabbix_status"] = "NÃO SOLICITADO"
+        updated["zabbix_detail"] = "Sem Protocolo Vivo confirmado."
+        return finish()
+    if not zabbix_target:
+        updated["zabbix_status"] = "PENDENTE"
+        updated["zabbix_detail"] = "VD ou host Zabbix não foi informado."
+        return finish()
+    if not credentials:
+        updated["zabbix_status"] = "NÃO CONFIGURADO"
+        updated["zabbix_detail"] = "Cadastre a URL e o token da API no botão Configurar Zabbix."
+        return finish()
+    if not credentials.automatico:
+        updated["zabbix_status"] = "DESATIVADO"
+        updated["zabbix_detail"] = "Reconhecimento automático desativado na configuração."
+        return finish()
+    try:
+        client = client_factory(credentials)
+        acknowledgement = client.acknowledge_host_problem(zabbix_target, protocol)
+        updated["zabbix_host"] = acknowledgement.host
+        updated["zabbix_status"] = "RECONHECIDO"
+        updated["zabbix_detail"] = (
+            f"Evento {acknowledgement.eventid} reconhecido com o protocolo {protocol}."
+        )
+    except Exception as exc:
+        logging.warning(
+            "Reconhecimento Zabbix pendente para %s: %s",
+            zabbix_target,
+            friendly_error(exc),
+        )
+        updated["zabbix_status"] = "PENDENTE"
+        updated["zabbix_detail"] = friendly_error(exc)
+    return finish()
+
+
+def event_result_fields(event: Mapping[str, Any]) -> tuple[str, str, str]:
+    """Extrai protocolo, número do caso e LP de um evento do worker."""
+
+    nested = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+    protocol = str(
+        event.get("protocol")
+        or event.get("protocolo")
+        or event.get("protocolo_vivo")
+        or field(nested, "protocol", "protocolo", "protocolo_vivo")
+        or ""
+    ).strip()
+    case_number = str(
+        event.get("case_number")
+        or event.get("numero_caso")
+        or event.get("case")
+        or field(nested, "case_number", "numero_caso", "case")
+        or ""
+    ).strip()
+    lp = str(
+        event.get("lp")
+        or event.get("identification")
+        or event.get("identificacao")
+        or field(nested, "lp", "identification", "identificacao")
+        or ""
+    ).strip()
+    return protocol, case_number, lp
+
+
 class VivoApp:
     POLL_MS = 80
 
@@ -979,33 +1281,10 @@ class VivoApp:
         )
 
     def _node_and_worker(self) -> tuple[str, Path]:
-        node = os.environ.get("ROBO_NODE_EXE", "").strip()
-        if not node:
-            node = shutil.which("node") or ""
-        worker_candidates = (APP_DIR / "vivo_worker.mjs", PACKAGE_DIR / "automation" / "vivo_worker.mjs")
-        worker = next((path for path in worker_candidates if path.is_file()), worker_candidates[0])
-        if node and not Path(node).is_file():
-            # Alguns pacotes antigos apontavam para ``node\node.exe`` enquanto
-            # o runtime atual o mantém em ``node\bin\node.exe``.
-            alternate = Path(node).parent / "bin" / "node.exe"
-            if alternate.is_file():
-                node = str(alternate)
-        if not node or not Path(node).is_file():
-            # shutil.which pode retornar nome resolvível, mas normalmente retorna caminho.
-            resolved = shutil.which(node) if node else None
-            if not resolved:
-                raise FileNotFoundError("O componente Node.js não foi encontrado.")
-            node = resolved
-        if not worker.is_file():
-            raise FileNotFoundError(f"Automação do portal não encontrada: {worker}")
-        return node, worker
+        return find_node_and_worker()
 
     def _credential_api(self) -> Any:
-        if str(APP_DIR) not in sys.path:
-            sys.path.insert(0, str(APP_DIR))
-        import credential_store  # type: ignore
-
-        return credential_store
+        return credential_api()
 
     def _load_credentials(self) -> Any:
         return self._credential_api().carregar()
@@ -1014,11 +1293,7 @@ class VivoApp:
         return self._credential_api().carregar_zabbix()
 
     def _zabbix_client(self, credentials: Any) -> Any:
-        if str(APP_DIR) not in sys.path:
-            sys.path.insert(0, str(APP_DIR))
-        from zabbix_client import ZabbixClient  # type: ignore
-
-        return ZabbixClient(credentials.api_url, credentials.token)
+        return zabbix_client_for(credentials)
 
     def _refresh_zabbix_button(self) -> None:
         try:
@@ -1046,16 +1321,7 @@ class VivoApp:
     def _clear_robot_profile(self) -> None:
         """Remove somente a sessão do perfil exclusivo deste robô."""
 
-        local_app_data_raw = os.environ.get("LOCALAPPDATA", "").strip()
-        if not local_app_data_raw:
-            raise OSError("A pasta LOCALAPPDATA do Windows não está disponível.")
-        local_app_data = Path(local_app_data_raw).resolve()
-        robot_root = (local_app_data / "RoboVivo").resolve()
-        profile = (robot_root / "ChromeProfile").resolve()
-        if robot_root not in profile.parents or profile.name != "ChromeProfile":
-            raise RuntimeError("O caminho do perfil do robô não pôde ser validado.")
-        if profile.is_dir():
-            shutil.rmtree(profile)
+        clear_robot_profile()
 
     def configure_credentials(self, first_use: bool = False) -> None:
         from tkinter import messagebox
@@ -1643,49 +1909,9 @@ class VivoApp:
     def _zabbix_update_result(
         self, result: dict[str, str], credentials: Any
     ) -> dict[str, str]:
-        updated = dict(result)
-
-        def finish() -> dict[str, str]:
-            self._write_zabbix_audit(updated)
-            return updated
-
-        protocol = str(updated.get("protocol") or "").strip()
-        host = str(updated.get("zabbix_host") or "").strip()
-        vd = str(updated.get("vd") or "").strip()
-        zabbix_target = host or vd
-        if updated.get("status") != "ABERTO" or not protocol:
-            updated["zabbix_status"] = "NÃO SOLICITADO"
-            updated["zabbix_detail"] = "Sem Protocolo Vivo confirmado."
-            return finish()
-        if not zabbix_target:
-            updated["zabbix_status"] = "PENDENTE"
-            updated["zabbix_detail"] = "VD ou host Zabbix não foi informado."
-            return finish()
-        if not credentials:
-            updated["zabbix_status"] = "NÃO CONFIGURADO"
-            updated["zabbix_detail"] = "Cadastre a URL e o token da API no botão Configurar Zabbix."
-            return finish()
-        if not credentials.automatico:
-            updated["zabbix_status"] = "DESATIVADO"
-            updated["zabbix_detail"] = "Reconhecimento automático desativado na configuração."
-            return finish()
-        try:
-            client = self._zabbix_client(credentials)
-            acknowledgement = client.acknowledge_host_problem(zabbix_target, protocol)
-            updated["zabbix_host"] = acknowledgement.host
-            updated["zabbix_status"] = "RECONHECIDO"
-            updated["zabbix_detail"] = (
-                f"Evento {acknowledgement.eventid} reconhecido com o protocolo {protocol}."
-            )
-        except Exception as exc:
-            logging.warning(
-                "Reconhecimento Zabbix pendente para %s: %s",
-                zabbix_target,
-                friendly_error(exc),
-            )
-            updated["zabbix_status"] = "PENDENTE"
-            updated["zabbix_detail"] = friendly_error(exc)
-        return finish()
+        return zabbix_update_result(
+            self.config, result, credentials, client_factory=self._zabbix_client
+        )
 
     def _start_batch_zabbix(self) -> None:
         if self.batch_zabbix_started:
@@ -2235,80 +2461,14 @@ class VivoApp:
         vd_value: Optional[str] = None,
         issue_value: Optional[str] = None,
     ) -> dict[str, Any]:
-        target_vd = vd_value or self.vd_var.get()
-        target_issue = issue_value or self.issue_var.get()
-        ticket_store = field(ticket, "loja", default=store)
-        if not isinstance(ticket_store, Mapping):
-            ticket_store = store
-        ticket_link = field(ticket, "link", "circuito", default=link)
-        if not isinstance(ticket_link, Mapping):
-            ticket_link = link
-        start = field(ticket, "hora_inicio", default=field(ticket_store, "hora_inicio"))
-        finish = field(
+        return build_ticket_payload(
+            self.config,
             ticket,
-            "hora_fim",
-            "hora_termino",
-            default=field(ticket_store, "hora_fim", "hora_termino"),
+            store,
+            link,
+            vd_value or self.vd_var.get(),
+            issue_value or self.issue_var.get(),
         )
-        is_24h = bool(field(ticket_store, "vinte_quatro_horas", default=False))
-        if is_24h:
-            start, finish = "00:00", "23:59"
-        contact = {
-            "apelido": target_vd,
-            "nome": self.config.get("contato", "nome", fallback="central de comando"),
-            "telefone": self.config.get("contato", "telefone", fallback="1132747527"),
-            "email": self.config.get(
-                "contato", "email", fallback="central.comando@dpsp.com.br"
-            ),
-            "compartilhar_celular": self.config.get(
-                "contato", "compartilhar_celular", fallback="Sim"
-            ),
-            "capacitacao_documentacao": self.config.get(
-                "contato", "capacitacao_documentacao", fallback="Sim"
-            ),
-        }
-        description = field(ticket, "descricao")
-        if not description:
-            raise RuntimeError("A descrição do chamado não foi gerada pela base.")
-        payload = {
-            "request_id": str(uuid.uuid4()),
-            "config_path": str(CONFIG_PATH),
-            "vd": target_vd,
-            "problema": target_issue,
-            "issue": target_issue,
-            "descricao": description,
-            "description": description,
-            "loja": dict(ticket_store),
-            "store": dict(ticket_store),
-            "circuito": dict(ticket_link),
-            "link": dict(ticket_link),
-            "horario_inicio": str(start),
-            "horario_termino": str(finish),
-            "hora_inicio": str(start),
-            "hora_fim": str(finish),
-            "contato": contact,
-            "contact": contact,
-            "produto_filtro": self.config.get("portal", "produto_filtro", fallback="mpls"),
-            "produto_esperado": self.config.get(
-                "portal", "produto_esperado", fallback="VPN IP MPLS"
-            ),
-            "portal_url": self.config.get(
-                "portal",
-                "url_portal",
-                fallback="https://mve.vivo.com.br/sec/dashboard",
-            ),
-            "ocorrencia": self.config.get(
-                "portal", "ocorrencia", fallback="Indisponibilidade"
-            ),
-            "tempo_protocolo_segundos": self.config.getint(
-                "portal", "tempo_protocolo_segundos", fallback=300
-            ),
-            "navegador_oculto": config_bool(
-                self.config, "portal", "navegador_oculto", fallback=True
-            ),
-            "allow_submit": True,
-        }
-        return payload
 
     def _base_confirmation(self, payload: Mapping[str, Any]) -> str:
         store = payload.get("loja", {})
@@ -2879,28 +3039,10 @@ class VivoApp:
         self.worker_kind = ""
 
     def _history_path(self) -> Path:
-        return resolve_config_path(self.config, "arquivos", "historico")
+        return history_path(self.config)
 
     def _write_zabbix_audit(self, result: Mapping[str, Any]) -> None:
-        try:
-            path = self._history_path().parent / "zabbix_reconhecimentos.csv"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            exists = path.is_file() and path.stat().st_size > 0
-            row = {
-                "data_hora": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-                "vd": str(result.get("vd") or ""),
-                "host": str(result.get("zabbix_host") or ""),
-                "protocolo_vivo": str(result.get("protocol") or ""),
-                "status_zabbix": str(result.get("zabbix_status") or ""),
-                "detalhe": str(result.get("zabbix_detail") or "").replace("\r", " ").replace("\n", " "),
-            }
-            with path.open("a", encoding="utf-8-sig", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=list(row), delimiter=";")
-                if not exists:
-                    writer.writeheader()
-                writer.writerow(row)
-        except Exception:
-            logging.exception("Não foi possível registrar a auditoria do Zabbix")
+        write_zabbix_audit(self.config, result)
 
     def _write_history(
         self,
@@ -2909,65 +3051,22 @@ class VivoApp:
         case_number: str,
         item: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        try:
-            path = self._history_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            exists = path.is_file() and path.stat().st_size > 0
-            if item:
-                link = item.get("link") or {}
-                store = item.get("store") or {}
-                vd_value = str(item.get("vd") or "")
-                issue_value = self.batch_issue or self.issue_var.get()
-            else:
-                link = self._selected_link() or {}
-                store = self.store or {}
-                vd_value = self.vd_var.get()
-                issue_value = self.issue_var.get()
-            row = {
-                "data_hora": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-                "vd": vd_value,
-                "loja": field(store, "nome", "nome_loja"),
-                "problema": issue_value,
-                "designacao": field(link, "designacao", "identificacao"),
-                "usuario_id": field(link, "usuario", "id_servico"),
-                "protocolo_vivo": protocol,
-                "numero_caso": case_number,
-                "status": status,
-            }
-            with path.open("a", encoding="utf-8-sig", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=list(row), delimiter=";")
-                if not exists:
-                    writer.writeheader()
-                writer.writerow(row)
-        except Exception:
-            logging.exception("Não foi possível registrar o histórico")
+        if item:
+            link = item.get("link") or {}
+            store = item.get("store") or {}
+            vd_value = str(item.get("vd") or "")
+            issue_value = self.batch_issue or self.issue_var.get()
+        else:
+            link = self._selected_link() or {}
+            store = self.store or {}
+            vd_value = self.vd_var.get()
+            issue_value = self.issue_var.get()
+        write_history(
+            self.config, status, protocol, case_number, vd_value, store, link, issue_value
+        )
 
     def _recent_duplicate(self, payload: Mapping[str, Any]) -> bool:
-        path = self._history_path()
-        if not path.is_file():
-            return False
-        window = self.config.getint("seguranca", "janela_duplicidade_horas", fallback=24)
-        cutoff = dt.datetime.now().astimezone() - dt.timedelta(hours=max(window, 0))
-        designation = str(field(payload.get("circuito", {}), "designacao", "identificacao"))
-        target_vd = str(payload.get("vd") or self.vd_var.get())
-        try:
-            with path.open("r", encoding="utf-8-sig", newline="") as stream:
-                for row in csv.DictReader(stream, delimiter=";"):
-                    if row.get("vd", "").casefold() != target_vd.casefold():
-                        continue
-                    if designation and row.get("designacao", "").casefold() != designation.casefold():
-                        continue
-                    try:
-                        recorded = dt.datetime.fromisoformat(row.get("data_hora", ""))
-                        if recorded.tzinfo is None:
-                            recorded = recorded.astimezone()
-                        if recorded >= cutoff:
-                            return True
-                    except ValueError:
-                        continue
-        except Exception:
-            logging.exception("Não foi possível consultar duplicidades no histórico")
-        return False
+        return recent_duplicate(self.config, payload, fallback_vd=self.vd_var.get())
 
     def _show_protocol_support_dialog(
         self, vd: str, lp: str, case_number: str
@@ -3130,6 +3229,11 @@ def self_test() -> int:
         if not worker.is_file():
             worker = PACKAGE_DIR / "automation" / "vivo_worker.mjs"
         result["checks"]["worker"] = worker.is_file()
+        import web_server  # type: ignore
+
+        result["checks"]["web_interface"] = callable(getattr(web_server, "serve", None)) and all(
+            (web_server.WEB_DIR / name).is_file() for name in ("index.html", "app.css", "app.js")
+        )
         result["checks"]["vd_normalization"] = (
             clean_vd("001517") == "VD1517" and clean_vd("3") == "VD003"
         )
@@ -3177,12 +3281,71 @@ def show_startup_error(title: str, message: str) -> None:
         print(f"{title}: {message}", file=sys.stderr)
 
 
+def run_web(simulation: bool = False, open_browser: bool = True) -> int:
+    """Inicia a interface web local; reabre a aba se ela já estiver rodando."""
+
+    # Importações explícitas para o PyInstaller incluir os módulos da
+    # biblioteca padrão usados por app/web_server.py (carregado do disco).
+    import http.server  # noqa: F401
+    import mimetypes  # noqa: F401
+    import secrets  # noqa: F401
+    import socketserver  # noqa: F401
+    import webbrowser
+
+    if str(APP_DIR) not in sys.path:
+        sys.path.insert(0, str(APP_DIR))
+    import web_server  # type: ignore
+
+    mutex: Optional[SingleInstanceMutex] = None
+    try:
+        try:
+            mutex = SingleInstanceMutex()
+        except AlreadyRunning:
+            url = web_server.read_session_url()
+            if url:
+                if open_browser:
+                    webbrowser.open(url)
+                return 0
+            show_startup_error(
+                "Robô já aberto",
+                "O Robô de Chamados Vivo já está aberto na janela tradicional. "
+                "Feche-o antes de abrir a interface web.",
+            )
+            return 2
+        config = load_config()
+        configure_logging(config)
+        return web_server.serve(
+            sys.modules[__name__], config, simulation=simulation, open_browser=open_browser
+        )
+    except Exception as exc:
+        try:
+            logging.exception("Falha fatal na interface web")
+        except Exception:
+            pass
+        show_startup_error("Robô de Chamados Vivo", friendly_error(exc))
+        return 1
+    finally:
+        if mutex:
+            mutex.close()
+
+
 def main(argv: Optional[Iterable[str]] = None) -> int:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--self-test", action="store_true", help="valida o pacote sem abrir a janela")
+    parser.add_argument("--web", action="store_true", help="abre a interface web local no navegador")
+    parser.add_argument(
+        "--simulacao",
+        action="store_true",
+        help="interface web em modo simulação: nada é enviado à Vivo nem ao Zabbix",
+    )
+    parser.add_argument(
+        "--sem-navegador", action="store_true", help="não abre o navegador automaticamente (web)"
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.self_test:
         return self_test()
+    if args.web or args.simulacao:
+        return run_web(simulation=args.simulacao, open_browser=not args.sem_navegador)
 
     mutex: Optional[SingleInstanceMutex] = None
     try:
