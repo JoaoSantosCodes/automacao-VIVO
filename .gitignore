@@ -28,7 +28,8 @@ ChromeProfile/
 **/logs/
 **/temp/
 .env
-.env.*
+.env*
+!.env.example
 
 # Cache Python e Node.js
 __pycache__/
@@ -37,6 +38,9 @@ __pycache__/
 .venv/
 venv/
 node_modules/
+
+# Vercel CLI
+.vercel/
 
 # Arquivos de sistema / IDE
 .DS_Store

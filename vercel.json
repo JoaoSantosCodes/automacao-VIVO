@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.mjs": {
+      "includeFiles": "**/arquivos/{app/web/**,assets/**,modelos/**,configuracao.ini}",
+      "supportsCancellation": true
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index?__robo_path=/$1"
+    }
+  ]
+}
+

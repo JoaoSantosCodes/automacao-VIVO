@@ -1,0 +1,45 @@
+# Variáveis de ambiente, controle de versão e metadados locais
+.git/
+.vercel/
+.env
+.env.*
+
+# Binários empacotados e runtimes portáteis locais
+**/arquivos/_internal/**
+**/arquivos/runtime/**
+*.exe
+*.dll
+*.pyd
+*.so
+build/
+dist/
+*.spec
+
+# Dados corporativos / bases locais (sensíveis - nunca enviar para nuvem)
+**/arquivos/data/**
+*.xlsx
+*.xls
+~$*
+
+# Histórico operacional, auditoria e logs locais
+**/arquivos/historico/**
+*.csv
+*.log
+
+# Perfis de navegador, sessões e temporários
+ChromeProfile/
+**/erros/**
+**/logs/**
+**/temp/**
+
+# Cache Python / Node / Sistema
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+node_modules/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
