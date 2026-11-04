@@ -1,0 +1,141 @@
+ROBÔ DE ABERTURA DE CHAMADOS VIVO - ACESSO AUTOMÁTICO
+
+IDENTIDADE VISUAL V5.5
+
+- Interface renovada com as cores Vivo, cabeçalho de marca e cartões mais claros.
+- Botão principal destacado e leitura aprimorada de andamento e resultado.
+- Novo ícone do aplicativo aplicado à janela e ao executável do Windows.
+- Botões de configuração renomeados para identificar claramente o login do
+  portal da Vivo e a API do Zabbix.
+- Área "Andamento" ampliada, com quebra de linha e barra de rolagem. Durante
+  a execução, o quadro de resultado ainda vazio é recolhido para mostrar mais
+  etapas; ele retorna automaticamente quando a operação termina.
+- Se o Protocolo Vivo não aparecer após os 5 minutos configurados, o robô
+  prepara uma frase de apoio com VD, LP confirmada no portal e número do caso,
+  disponível no botão "Copiar frase". O chamado não é reenviado.
+- Nenhuma regra de abertura, confirmação ou reconhecimento do Zabbix foi alterada.
+
+1. Na pasta principal "Automação Vivo", dê dois cliques em
+   "Executar automação vivo.bat". Não mova nem renomeie a pasta "arquivos".
+2. Somente no primeiro uso, informe CPF e senha na janela "Acesso automático".
+   A senha fica protegida pelo Gerenciador de Credenciais do Windows.
+3. Informe o VD com ou sem o prefixo, por exemplo: 1517 ou VD1517.
+4. Confira a loja e o circuito encontrados nas bases.
+5. Selecione "Link inoperante" ou "Perda de pacotes". A descrição seguirá o texto aprovado ("perca de pacotes").
+6. Confirme o circuito encontrado no portal. Depois da confirmação, o robô
+   preencherá e enviará o formulário automaticamente uma única vez.
+7. Ao concluir, use o botão "Copiar protocolo".
+
+RECONHECIMENTO AUTOMÁTICO NO ZABBIX
+
+Compatibilidade V5.1: a consulta de incidentes não solicita ordenação por
+"clock", pois o problem.get de diferentes versões do Zabbix aceita somente
+campos específicos para ordenação. Como o robô exige um único incidente ativo,
+nenhuma ordenação é necessária.
+
+1. Clique em "Configurar Zabbix".
+2. Informe a URL da API, normalmente:
+   http://172.16.2.250/api_jsonrpc.php
+3. Cole o token da API e clique em "Testar conexão". O teste consulta a versão
+   e valida a permissão de leitura sem alterar incidentes.
+4. Mantenha marcada a opção de reconhecimento automático e salve.
+5. Para reconhecer, informe o VD ou cole o host completo, por exemplo:
+   VD2678, DSP_2678_MPLS_VIVO ou DPA_0935_MPLS_VIVO.
+
+O token fica protegido pelo Gerenciador de Credenciais do Windows e não é
+gravado no BAT, INI, histórico ou logs. O robô somente chama o Zabbix depois
+de receber um Protocolo Vivo confirmado.
+
+Antes de alterar o incidente, o robô exige simultaneamente:
+
+- correspondência exata do host DSP/DPA;
+- exatamente um incidente ativo e ainda não reconhecido nesse host;
+- Protocolo Vivo disponível;
+- confirmação da API depois da atualização.
+
+O protocolo é gravado como mensagem e o incidente é marcado como reconhecido.
+Ao informar somente o VD, o robô procura os nomes DPA e DSP correspondentes e
+só continua quando existe exatamente um incidente ativo e não reconhecido no
+total. Se não encontrar nenhum ou encontrar mais de um, nada é alterado e o
+resultado aparece como "ZABBIX PENDENTE".
+
+A auditoria fica em:
+historico\zabbix_reconhecimentos.csv
+
+ABERTURA DE VÁRIOS VDs
+
+1. Clique em "Abrir vários VDs".
+2. Informe até 50 VDs, separados por espaço, vírgula, ponto e vírgula ou uma
+   linha por loja. Para reconhecimento automático, cole diretamente os hosts
+   do Zabbix, como DSP_2188_MPLS_VIVO e DPA_1842_MPLS_VIVO. O nome completo é
+   preservado até a atualização do incidente. VDs repetidos são ignorados.
+3. Escolha um tipo de problema. Essa opção será aplicada a todo o lote.
+4. Confira a revisão geral e autorize o início.
+5. O robô usa um único navegador e a mesma sessão autenticada, mantendo até
+   cinco abas ativas ao mesmo tempo. Cada aba fica vinculada ao seu próprio VD.
+   Enquanto uma aguarda o protocolo, as outras podem localizar circuito,
+   preencher o formulário ou avançar no portal.
+6. Antes de cada envio, confirme manualmente o circuito localizado no portal.
+   Essa confirmação é obrigatória também quando a identificação coincide.
+7. Ao final, uma tabela mostrará o status Vivo, o protocolo, o número do caso,
+   o host e o resultado do Zabbix para cada VD. Cada linha possui um botão
+   "Copiar protocolo", que copia
+   somente o protocolo daquele chamado. Marque as linhas desejadas para copiar
+   casos, detalhes ou frases completas; sem marcação, todas serão copiadas.
+
+No modo em lote, a confirmação inicial autoriza o processamento da fila, mas
+não substitui a conferência do circuito. O robô sempre mostrará os dados do
+portal e da base antes de cada chamado; o envio só continua após a resposta
+"Sim" nessa confirmação.
+
+As confirmações, resultados, protocolos e erros carregam um identificador
+individual. Assim, mesmo que a segunda aba termine antes da primeira, o
+resultado continua associado ao VD correto. O clique final em "Enviar" é
+espaçado em cerca de 1,5 segundo entre abas para evitar várias gravações no
+mesmo instante; isso não impede que até cinco páginas sejam preparadas e
+acompanhadas em paralelo.
+
+Uma validação extraordinária da Vivo (CAPTCHA, SMS ou atualização de cadastro)
+é registrada separadamente para o VD afetado. Como todas as abas usam a mesma
+sessão, as demais também podem solicitar validação e serão identificadas no
+resumo sem que o robô tente reenviar um chamado já submetido.
+
+Para trocar o colaborador, clique em "Alterar login do portal da Vivo", informe o
+novo CPF e a nova senha e salve. O perfil de sessão anterior do robô será
+descartado automaticamente.
+
+IMPORTANTE
+
+- O navegador trabalha oculto durante a operação normal.
+- O robô preenche CPF e senha sozinho quando a sessão da Vivo expirar.
+- Para usuários que recebem a tela "Validar Cadastro", o robô aguarda 30
+  segundos e depois continua o processo normal.
+- Se a Central de serviços abrir primeiro na área Financeiros, o robô seleciona
+  a aba "Técnicos" antes de entrar em "Abrir Chamado Técnico".
+- A busca tenta identificação exata, depois ID do serviço (quando disponível) e por fim palavras do endereço, número, CEP e cidade.
+- O resultado encontrado no portal sempre aparece para confirmação antes do
+  preenchimento, tanto no modo individual quanto no modo em lote.
+- O reconhecimento no Zabbix acontece somente depois do protocolo e nunca
+  provoca uma nova tentativa de abertura do chamado Vivo.
+- Na confirmação do circuito, o endereço encontrado no portal aparece separado
+  do endereço esperado pela base.
+- Não coloque login ou senha no arquivo BAT. A senha não fica nesta pasta, no INI, nas planilhas nem nos registros do robô.
+- Se a Vivo exigir CAPTCHA, código por SMS ou outra validação extraordinária de segurança, o robô interromperá antes do envio e informará o motivo. Essas proteções não são contornadas.
+- Se o chamado for enviado, mas o protocolo ainda não aparecer, não abra outro chamado. Use a consulta posterior pelo número do caso.
+- Os arquivos originais das bases não são alterados.
+- Esta primeira versão precisa ser homologada com uma abertura acompanhada no portal antes de uso em produção.
+- Esta versão já inclui os componentes do robô e não depende do Codex ou de Python/Node instalados.
+- O computador precisa ter Windows 64 bits e Google Chrome instalado.
+
+HOMOLOGAÇÃO RECOMENDADA
+
+1. Cadastre o acesso e consulte uma loja conhecida, como a VD1517.
+2. Confirme se os dados encontrados no portal são os mesmos exibidos pela base.
+3. Na primeira passagem, responda "Não" na confirmação do circuito encontrado
+   no portal; assim nenhum chamado será aberto.
+4. Depois dessa conferência, faça somente um chamado real acompanhado e valide
+   o Protocolo Vivo.
+
+ATUALIZAÇÃO DAS BASES
+
+Substitua os arquivos da pasta "data" por novas versões com os mesmos nomes. Feche o robô antes da troca.

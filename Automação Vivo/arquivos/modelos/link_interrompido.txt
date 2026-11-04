@@ -1,0 +1,24 @@
+Prezados,
+
+Favor verificar a filial: {NOME_LOJA}
+
+Se encontra com o link interrompido.
+
+Filial: {VD} - {NOME_LOJA}
+
+Reset: Sim
+
+Designação: {DESIGNACAO}
+
+Horário Funcionamento: {HORARIO}
+
+OBS: Para o envio de um técnico à loja, é necessário encaminhar um e-mail para central.comando@dpsp.com.br
+, contendo os dados do técnico e o VD da loja, conforme informado na descrição do chamado.
+
+Contato para validações:
+
+WhatsApp: (11) 99111-8142 (apenas mensagens)
+Telefone: (11) 3274-7527
+
+Grato!
+

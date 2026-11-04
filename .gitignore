@@ -1,0 +1,44 @@
+# Binários empacotados e runtimes portáteis
+**/arquivos/_internal/
+**/arquivos/runtime/
+*.exe
+*.dll
+*.pyd
+*.so
+build/
+dist/
+*.spec
+
+# Dados corporativos / bases locais (sensíveis)
+**/arquivos/data/*
+!**/arquivos/data/.gitkeep
+*.xlsx
+*.xls
+~$*
+
+# Histórico operacional, auditoria e logs
+**/arquivos/historico/*
+!**/arquivos/historico/.gitkeep
+*.csv
+*.log
+
+# Perfis de navegador, sessões e variáveis de ambiente
+ChromeProfile/
+**/erros/
+**/logs/
+**/temp/
+.env
+.env.*
+
+# Cache Python e Node.js
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+node_modules/
+
+# Arquivos de sistema / IDE
+.DS_Store
+Thumbs.db
+Desktop.ini
